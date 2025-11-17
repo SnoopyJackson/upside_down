@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metal Archives Band Search</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤘 Metal Archives Search 🤘</h1>
+            <p class="subtitle">Explore the Encyclopedia Metallum</p>
+        </header>
+
+        <div class="search-container">
+            <div class="search-box">
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    placeholder="Search for a metal band..."
+                    autocomplete="off"
+                >
+                <button id="searchBtn">Search</button>
+            </div>
+
+            <div class="filters">
+                <div class="filter-group">
+                    <label for="genreFilter">Genre</label>
+                    <select id="genreFilter">
+                        <option value="">All Genres</option>
+                        <option value="Black">Black Metal</option>
+                        <option value="Death">Death Metal</option>
+                        <option value="Thrash">Thrash Metal</option>
+                        <option value="Heavy">Heavy Metal</option>
+                        <option value="Power">Power Metal</option>
+                        <option value="Doom">Doom Metal</option>
+                        <option value="Progressive">Progressive Metal</option>
+                        <option value="Folk">Folk Metal</option>
+                        <option value="Gothic">Gothic Metal</option>
+                        <option value="Melodic">Melodic Death Metal</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="countryFilter">Country</label>
+                    <select id="countryFilter">
+                        <option value="">All Countries</option>
+                        <option value="United States">United States</option>
+                        <option value="United Kingdom">United Kingdom</option>
+                        <option value="Germany">Germany</option>
+                        <option value="Sweden">Sweden</option>
+                        <option value="Norway">Norway</option>
+                        <option value="Finland">Finland</option>
+                        <option value="France">France</option>
+                        <option value="Italy">Italy</option>
+                        <option value="Poland">Poland</option>
+                        <option value="Canada">Canada</option>
+                        <option value="Brazil">Brazil</option>
+                        <option value="Japan">Japan</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label for="statusFilter">Status</label>
+                    <select id="statusFilter">
+                        <option value="">All Status</option>
+                        <option value="Active">Active</option>
+                        <option value="Split-up">Split-up</option>
+                        <option value="On hold">On hold</option>
+                        <option value="Unknown">Unknown</option>
+                        <option value="Changed name">Changed name</option>
+                    </select>
+                </div>
+
+                <div class="filter-group">
+                    <label>&nbsp;</label>
+                    <button class="clear-filters" onclick="clearFilters()">Clear Filters</button>
+                </div>
+            </div>
+
+            <div id="error"></div>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            🔍 Searching the metal archives...
+        </div>
+
+        <div id="resultsHeader" class="results-header">
+            <div class="results-count" id="resultsCount">Popular Metal Bands</div>
+        </div>
+
+        <div id="results" class="results"></div>
+    </div>
+
+    <script src="app.js" defer></script>
+</body>
+</html>
