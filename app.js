@@ -11,12 +11,21 @@ const statusFilter = document.getElementById('statusFilter');
 
 let allBands = [];
 
-// Popular bands to display initially
-const popularBands = [
-    'Metallica', 'Iron Maiden', 'Black Sabbath', 'Slayer', 'Megadeth',
-    'Judas Priest', 'Pantera', 'Opeth', 'Death', 'Slipknot',
-    'System of a Down', 'Tool', 'Nightwish', 'Blind Guardian', 'Amon Amarth'
-];
+// Map country names from the select to ISO codes for MusicBrainz queries
+const countryToISO = {
+    'United States': 'US',
+    'United Kingdom': 'GB',
+    'Germany': 'DE',
+    'Sweden': 'SE',
+    'Norway': 'NO',
+    'Finland': 'FI',
+    'France': 'FR',
+    'Italy': 'IT',
+    'Poland': 'PL',
+    'Canada': 'CA',
+    'Brazil': 'BR',
+    'Japan': 'JP'
+};
 
 searchInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
@@ -25,44 +34,108 @@ searchInput.addEventListener('keypress', (e) => {
 });
 
 searchBtn.addEventListener('click', searchBands);
-genreFilter.addEventListener('change', applyFilters);
-countryFilter.addEventListener('change', applyFilters);
-statusFilter.addEventListener('change', applyFilters);
+genreFilter.addEventListener('change', () => { if (!searchInput.value.trim()) loadPopularBands(); else applyFilters(); });
+countryFilter.addEventListener('change', () => { if (!searchInput.value.trim()) loadPopularBands(); else applyFilters(); });
+statusFilter.addEventListener('change', () => { if (!searchInput.value.trim()) loadPopularBands(); else applyFilters(); });
 
-// Load popular bands on page load
+// On load: show popular for current filters (or general metal tag)
 loadPopularBands();
+
+async function buildMusicBrainzQueryFromFilters() {
+    // If user entered a search term, caller will use searchBands() instead.
+    const parts = [];
+
+    const genre = genreFilter.value;
+    const country = countryFilter.value;
+
+    if (genre) {
+        // Use tag search for genre
+        parts.push(`tag:"${genre}"`);
+    } else {
+        // default to metal tag
+        parts.push('tag:"metal" OR tag:"heavy metal"');
+    }
+
+    if (country) {
+        const iso = countryToISO[country];
+        if (iso) parts.push(`country:${iso}`);
+        else parts.push(`area:"${country}"`);
+    }
+
+    // Join parts with AND
+    return parts.join(' AND ');
+}
 
 async function loadPopularBands() {
     loading.style.display = 'block';
     resultsHeader.style.display = 'flex';
-    
-    try {
-        // Fetch multiple popular bands
-        const bandPromises = popularBands.map(band => 
-            fetch(`https://www.metal-archives.com/search/ajax-band-search/?field=name&query=${encodeURIComponent(band)}&sEcho=1&iDisplayStart=0&iDisplayLength=1`)
-                .then(res => {
-                    if (!res.ok) return null;
-                    const ct = res.headers.get('content-type') || '';
-                    if (!ct.includes('application/json')) return null;
-                    return res.json().then(data => data.aaData && data.aaData.length > 0 ? data.aaData[0] : null).catch(() => null);
-                })
-                .catch(() => null)
-        );
 
-        const resultsArr = await Promise.all(bandPromises);
-        
-        allBands = resultsArr
-            .filter(band => band !== null)
-            .map(band => ({
-                name: extractText(band[0]),
-                link: extractLink(band[0]),
-                country: extractText(band[1]),
-                genre: extractText(band[2]),
-                status: extractText(band[3])
-            }));
+    try {
+        const query = await buildMusicBrainzQueryFromFilters();
+        const url = `https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(query)}&fmt=json&limit=25`;
+        const response = await fetch(url, { headers: { 'Accept': 'application/json', 'User-Agent': 'metla-example/1.0 ( your-email@example.com )' } });
+
+        if (!response.ok) {
+            showError(`MusicBrainz returned ${response.status}`);
+            loading.style.display = 'none';
+            return;
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            showError('Unexpected response from MusicBrainz.');
+            loading.style.display = 'none';
+            return;
+        }
+
+        const data = await response.json();
+
+        if (!data || !data.artists || data.artists.length === 0) {
+            results.innerHTML = '<div class="no-results">No artists found for current filters.</div>';
+            loading.style.display = 'none';
+            return;
+        }
+
+        // Enrich with TheAudioDB similar to search flow
+        allBands = await Promise.all(data.artists.map(async (artist) => {
+            const band = {
+                name: artist.name,
+                link: `https://musicbrainz.org/artist/${artist.id}`,
+                country: artist.country || (artist.area ? artist.area.name : 'Unknown'),
+                genre: artist.type || (artist.tags && artist.tags.length ? artist.tags.map(t=>t.name).slice(0,3).join(', ') : 'Unknown'),
+                status: (artist['life-span'] && artist['life-span'].ended) ? 'Split-up' : 'Active',
+                thumb: null,
+                description: ''
+            };
+
+            try {
+                const taUrl = `https://theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(artist.name)}`;
+                const taRes = await fetch(taUrl);
+                if (taRes.ok) {
+                    const taData = await taRes.json().catch(() => null);
+                    if (taData && taData.artists && taData.artists.length > 0) {
+                        const a = taData.artists[0];
+                        band.thumb = a.strArtistThumb || a.strArtistLogo || a.strArtistFanart || null;
+                        band.description = a.strBiographyEN || a.strBiographyFR || '';
+                    }
+                }
+            } catch (e) {
+                console.warn('TheAudioDB fetch failed for', artist.name, e);
+            }
+
+            return band;
+        }));
+
+        // If a status filter is selected, apply it
+        const statusValue = statusFilter.value;
+        let filtered = allBands;
+        if (statusValue) {
+            if (statusValue === 'Active') filtered = allBands.filter(b => b.status === 'Active');
+            else if (statusValue === 'Split-up') filtered = allBands.filter(b => b.status === 'Split-up');
+        }
 
         loading.style.display = 'none';
-        displayResults(allBands);
+        displayResults(filtered);
     } catch (error) {
         loading.style.display = 'none';
         console.error('Error loading popular bands:', error);
@@ -85,7 +158,14 @@ async function searchBands() {
     searchBtn.disabled = true;
 
     try {
-        const response = await fetch(`https://www.metal-archives.com/search/ajax-band-search/?field=name&query=${encodeURIComponent(query)}&sEcho=1&iDisplayStart=0&iDisplayLength=50`);
+        // Use MusicBrainz artist search
+        const response = await fetch(`https://musicbrainz.org/ws/2/artist?query=artist:${encodeURIComponent(query)}&fmt=json&limit=50`, {
+            headers: {
+                'Accept': 'application/json',
+                // Identify the application per MusicBrainz requirements
+                'User-Agent': 'metla-example/1.0 ( your-email@example.com )'
+            }
+        });
 
         if (!response.ok) {
             const msg = `Server returned ${response.status} ${response.statusText}`;
@@ -121,18 +201,40 @@ async function searchBands() {
         loading.style.display = 'none';
         searchBtn.disabled = false;
 
-        if (data.aaData && data.aaData.length > 0) {
-            allBands = data.aaData.map(band => ({
-                name: extractText(band[0]),
-                link: extractLink(band[0]),
-                country: extractText(band[1]),
-                genre: extractText(band[2]),
-                status: extractText(band[3])
+        if (data && data.artists && data.artists.length > 0) {
+            allBands = await Promise.all(data.artists.map(async (artist) => {
+                const band = {
+                    name: artist.name,
+                    link: `https://musicbrainz.org/artist/${artist.id}`,
+                    country: artist.country || (artist.area ? artist.area.name : 'Unknown'),
+                    genre: artist.type || (artist.tags && artist.tags.length ? artist.tags.map(t=>t.name).slice(0,3).join(', ') : 'Unknown'),
+                    status: (artist['life-span'] && artist['life-span'].ended) ? 'Split-up' : 'Active',
+                    thumb: null,
+                    description: ''
+                };
+
+                // Try fetching artwork/biography from TheAudioDB
+                try {
+                    const taUrl = `https://theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(artist.name)}`;
+                    const taRes = await fetch(taUrl);
+                    if (taRes.ok) {
+                        const taData = await taRes.json().catch(() => null);
+                        if (taData && taData.artists && taData.artists.length > 0) {
+                            const a = taData.artists[0];
+                            band.thumb = a.strArtistThumb || a.strArtistLogo || a.strArtistFanart || null;
+                            band.description = a.strBiographyEN || a.strBiographyFR || '';
+                        }
+                    }
+                } catch (e) {
+                    console.warn('TheAudioDB fetch failed for', artist.name, e);
+                }
+
+                return band;
             }));
             resultsCount.textContent = `Search Results for "${query}"`;
             applyFilters();
         } else {
-            results.innerHTML = '<div class="no-results">No bands found. Try another search term.</div>';
+            results.innerHTML = '<div class="no-results">No artists found. Try another search term.</div>';
         }
     } catch (error) {
         loading.style.display = 'none';
@@ -172,14 +274,13 @@ function displayResults(bands) {
     resultsCount.textContent = `${bands.length} band${bands.length !== 1 ? 's' : ''}`;
 
     results.innerHTML = bands.map(band => {
-        const description = generateDescription(band);
-        const genres = band.genre.split(/[,/]/).slice(0, 3);
+        const description = band.description && band.description.length > 0 ? (band.description.length > 300 ? band.description.slice(0,300) + '…' : band.description) : generateDescription(band);
+        const genres = (band.genre || '').toString().split(/[,/]/).slice(0, 3);
+        const imageBlock = band.thumb ? `<img src="${band.thumb}" alt="${band.name} thumbnail" class="band-image">` : `<div class="band-logo">${band.name}</div>`;
         
         return `
             <div class="band-card">
-                <div class="band-image-container">
-                    <div class="band-logo">${band.name}</div>
-                </div>
+                <div class="band-image-container">${imageBlock}</div>
                 <div class="band-content">
                     <div class="band-name">${band.name}</div>
                     
@@ -237,7 +338,11 @@ function clearFilters() {
     genreFilter.value = '';
     countryFilter.value = '';
     statusFilter.value = '';
-    applyFilters();
+    if (searchInput.value.trim()) {
+        applyFilters();
+    } else {
+        loadPopularBands();
+    }
 }
 
 // Expose clearFilters for inline onclick usage

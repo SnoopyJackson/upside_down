@@ -187,6 +187,7 @@ button:disabled {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
 }
 
 .band-logo {
@@ -201,6 +202,10 @@ button:disabled {
     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
     padding: 20px;
     width: 100%;
+}
+
+.band-image-container img.band-image {
+    border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
 .band-content {
@@ -222,6 +227,10 @@ button:disabled {
     line-height: 1.6;
     margin-bottom: 15px;
     flex: 1;
+}
+
+.band-description p {
+    margin-bottom: 0.5rem;
 }
 
 .band-info {
