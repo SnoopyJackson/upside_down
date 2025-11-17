@@ -190,6 +190,10 @@ button:disabled {
     display: block;
 }
 
+.band-image[alt] {
+    background-color: #111;
+}
+
 .band-logo {
     position: absolute;
     top: 50%;
@@ -203,6 +207,8 @@ button:disabled {
     padding: 20px;
     width: 100%;
 }
+
+.band-image-container img.band-image + .band-logo { display: none; }
 
 .band-image-container img.band-image {
     border-bottom: 1px solid rgba(255,255,255,0.06);

@@ -27,6 +27,73 @@ const countryToISO = {
     'Japan': 'JP'
 };
 
+// Try to get Wikipedia/Wikidata info for an artist via MusicBrainz relations
+async function fetchWikiInfo(artist) {
+    // First check if the artist object already has relations with URLs
+    if (artist.relations && artist.relations.length) {
+        const wikiRel = artist.relations.find(r => r.type && r.type.toLowerCase().includes('wikipedia')) || artist.relations.find(r => r.type && r.type.toLowerCase().includes('wikidata'));
+        if (wikiRel && wikiRel.url && wikiRel.url.resource) {
+            const wikiUrl = wikiRel.url.resource;
+            const title = extractWikipediaTitle(wikiUrl);
+            if (title) return fetchWikipediaSummary(title);
+        }
+    }
+
+    // If not present, fetch relations from MusicBrainz lookup
+    try {
+        const relUrl = `https://musicbrainz.org/ws/2/artist/${artist.id}?inc=url-rels&fmt=json`;
+        const res = await fetch(relUrl, { headers: { 'Accept': 'application/json', 'User-Agent': 'metla-example/1.0 ( your-email@example.com )' } });
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => null);
+        if (!data || !data.relations) return null;
+        const wikiRel = data.relations.find(r => r.type && r.type.toLowerCase().includes('wikipedia')) || data.relations.find(r => r.type && r.type.toLowerCase().includes('wikidata'));
+        if (wikiRel && wikiRel.url && wikiRel.url.resource) {
+            const title = extractWikipediaTitle(wikiRel.url.resource);
+            if (title) return fetchWikipediaSummary(title);
+        }
+    } catch (e) {
+        console.warn('Failed to fetch relations for', artist.id, e);
+    }
+
+    return null;
+}
+
+function extractWikipediaTitle(url) {
+    try {
+        const u = new URL(url);
+        // handle wikipedia.org/wiki/Title
+        if (u.hostname.includes('wikipedia.org')) {
+            const parts = u.pathname.split('/');
+            return decodeURIComponent(parts[parts.length - 1]);
+        }
+        // handle wikidata links later (not implemented fully)
+        if (u.hostname.includes('wikidata.org')) {
+            // could resolve entity to wikipedia via wikidata API, skip for now
+            return null;
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+async function fetchWikipediaSummary(title) {
+    try {
+        const api = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+        const res = await fetch(api, { headers: { 'Accept': 'application/json' } });
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => null);
+        if (!data) return null;
+        return {
+            thumb: data.thumbnail && data.thumbnail.source ? data.thumbnail.source : null,
+            description: data.extract || ''
+        };
+    } catch (e) {
+        console.warn('Failed to fetch Wikipedia summary for', title, e);
+        return null;
+    }
+}
+
 searchInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         searchBands();
@@ -108,20 +175,16 @@ async function loadPopularBands() {
                 description: ''
             };
 
-            try {
-                const taUrl = `https://theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(artist.name)}`;
-                const taRes = await fetch(taUrl);
-                if (taRes.ok) {
-                    const taData = await taRes.json().catch(() => null);
-                    if (taData && taData.artists && taData.artists.length > 0) {
-                        const a = taData.artists[0];
-                        band.thumb = a.strArtistThumb || a.strArtistLogo || a.strArtistFanart || null;
-                        band.description = a.strBiographyEN || a.strBiographyFR || '';
+                // Enrich via Wikipedia/Wikidata: find wiki links from MusicBrainz, then fetch summary
+                try {
+                    const wiki = await fetchWikiInfo(artist);
+                    if (wiki) {
+                        if (wiki.thumb) band.thumb = wiki.thumb;
+                        if (wiki.description) band.description = wiki.description;
                     }
+                } catch (e) {
+                    console.warn('Wiki enrichment failed for', artist.name, e);
                 }
-            } catch (e) {
-                console.warn('TheAudioDB fetch failed for', artist.name, e);
-            }
 
             return band;
         }));
@@ -213,20 +276,15 @@ async function searchBands() {
                     description: ''
                 };
 
-                // Try fetching artwork/biography from TheAudioDB
+                // Enrich via Wikipedia/Wikidata: find wiki links from MusicBrainz, then fetch summary
                 try {
-                    const taUrl = `https://theaudiodb.com/api/v1/json/2/search.php?s=${encodeURIComponent(artist.name)}`;
-                    const taRes = await fetch(taUrl);
-                    if (taRes.ok) {
-                        const taData = await taRes.json().catch(() => null);
-                        if (taData && taData.artists && taData.artists.length > 0) {
-                            const a = taData.artists[0];
-                            band.thumb = a.strArtistThumb || a.strArtistLogo || a.strArtistFanart || null;
-                            band.description = a.strBiographyEN || a.strBiographyFR || '';
-                        }
+                    const wiki = await fetchWikiInfo(artist);
+                    if (wiki) {
+                        if (wiki.thumb) band.thumb = wiki.thumb;
+                        if (wiki.description) band.description = wiki.description;
                     }
                 } catch (e) {
-                    console.warn('TheAudioDB fetch failed for', artist.name, e);
+                    console.warn('Wiki enrichment failed for', artist.name, e);
                 }
 
                 return band;
@@ -276,7 +334,9 @@ function displayResults(bands) {
     results.innerHTML = bands.map(band => {
         const description = band.description && band.description.length > 0 ? (band.description.length > 300 ? band.description.slice(0,300) + '…' : band.description) : generateDescription(band);
         const genres = (band.genre || '').toString().split(/[,/]/).slice(0, 3);
-        const imageBlock = band.thumb ? `<img src="${band.thumb}" alt="${band.name} thumbnail" class="band-image">` : `<div class="band-logo">${band.name}</div>`;
+        const placeholder = `https://ui-avatars.com/api/?name=${encodeURIComponent(band.name)}&background=111111&color=ff4444&size=512`;
+        const src = band.thumb ? band.thumb : placeholder;
+        const imageBlock = `<img src="${src}" alt="${band.name} thumbnail" class="band-image" loading="lazy" onerror="this.onerror=null;this.src='${placeholder}';">`;
         
         return `
             <div class="band-card">
